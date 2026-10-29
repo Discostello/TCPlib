@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "F0pw4phFwFU=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Admin\\source\\repos\\WebApplication\\WebApplication\\WebApplication.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Admin\\.nuget\\packages\\respite\\3.4.20\\respite.3.4.20.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\stackexchange.redis\\3.4.20\\stackexchange.redis.3.4.20.nupkg.sha512",
+    "C:\\Users\\Admin\\.nuget\\packages\\system.io.hashing\\10.0.13\\system.io.hashing.10.0.13.nupkg.sha512"
+  ],
+  "logs": []
+}
