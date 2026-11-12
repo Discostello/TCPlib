@@ -5,7 +5,7 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
-string connectionString = builder.Configuration.GetConnectionString("Host=192.168.1.10;Database=main;Username=postgres;Password=6A6DXfm")
+string connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string not found.");
 
 builder.Services.AddTransient<IDbConnection>(_ => new NpgsqlConnection(connectionString));
@@ -110,7 +110,7 @@ rentApi.MapGet("/history/{userId:int}", async (int userId, IDbConnection db) =>
     }
 });
 
-app.Run("http://192.168.1.10:8080");
+app.Run("http://127.0.0.1:8080");
 
 // Модели данных (DTO) для входящих запросов от самокатов/приложения
 public record StartRideRequest(long ScooterId, long UserId);

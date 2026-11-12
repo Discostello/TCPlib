@@ -5,7 +5,7 @@ using System.Text.Json;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Получаем строку подключения к Redis из appsettings.json (по умолчанию "localhost:6379")
-string redisConnectionString = builder.Configuration.GetConnectionString("192.168.11:6379")
+string redisConnectionString = builder.Configuration.GetConnectionString("RedisConnection")
     ?? "localhost:6379";
 
 // Регистрируем подключение к Redis как Singleton
