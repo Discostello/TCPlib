@@ -1,4 +1,6 @@
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
@@ -11,14 +13,18 @@ string connectionString = builder.Configuration.GetConnectionString("DefaultConn
 builder.Services.AddTransient<IDbConnection>(_ => new NpgsqlConnection(connectionString));
 
 var app = builder.Build();
-
 var rentApi = app.MapGroup("/api/v1/rent");
 
-// 1. НАЧАТЬ ПОЕЗДКУ (Фиксация старта в public.rides)
-// Маршрут: POST http://192.168.1.10:8080/api/v1/rent/start
+// Вспомогательная функция SHA-256 хеширования
+static string ComputeSha256Hash(string rawData)
+{
+    byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawData));
+    return Convert.ToHexString(bytes).ToLowerInvariant();
+}
+
+// 1. НАЧАТЬ ПОЕЗДКУ
 rentApi.MapPost("/start", async ([FromBody] StartRideRequest request, IDbConnection db) =>
 {
-    // Запрос к вашей таблице public.rides. Используем двойные кавычки для "ID", если они критичны в БД
     const string sql = @"
         INSERT INTO public.rides (scooter_id, user_id, ride_start) 
         VALUES (@ScooterId, @UserId, CURRENT_TIMESTAMP) 
@@ -27,12 +33,14 @@ rentApi.MapPost("/start", async ([FromBody] StartRideRequest request, IDbConnect
     try
     {
         var rideId = await db.ExecuteScalarAsync<long>(sql, request);
+        string startHash = ComputeSha256Hash($"{rideId}:{request.UserId}:{request.ScooterId}");
 
         return Results.Ok(new
         {
             success = true,
             message = "Ride started successfully",
-            rideId = rideId
+            rideId = rideId,
+            rideHash = startHash
         });
     }
     catch (Exception ex)
@@ -41,17 +49,17 @@ rentApi.MapPost("/start", async ([FromBody] StartRideRequest request, IDbConnect
     }
 });
 
-// 2. ЗАВЕРШИТЬ ПОЕЗДКУ (Обновление public.rides + создание public."Transactions")
-// Маршрут: POST http://192.168.1.10:8080/api/v1/rent/stop
+// 2. ЗАВЕРШИТЬ ПОЕЗДКУ
 rentApi.MapPost("/stop", async ([FromBody] EndRideRequest request, IDbConnection db) =>
 {
-    // Открываем транзакцию в C#, так как нужно обновить поездку и списать деньги одновременно
     db.Open();
     using var transaction = db.BeginTransaction();
 
     try
     {
-        // Шаг А: Обновляем запись поездки в public.rides
+        // Генерируем контрольный SHA-256 хеш поездки и транзакции
+        string receiptHash = ComputeSha256Hash($"{request.RideId}:{request.UserId}:{request.Duration}:{request.Cost}");
+
         const string updateRideSql = @"
             UPDATE public.rides 
             SET ride_end = CURRENT_TIMESTAMP, 
@@ -67,17 +75,19 @@ rentApi.MapPost("/stop", async ([FromBody] EndRideRequest request, IDbConnection
             return Results.BadRequest(new { success = false, message = "Ride not found or already finished" });
         }
 
-        // Шаг Б: Создаем запись о списании денег в public."Transactions"
         const string insertTransactionSql = @"
             INSERT INTO public.""Transactions"" (""Cli_ID"", ""Sum"", ""Date"", ride_id)
             VALUES (@UserId, @Cost, CURRENT_DATE, @RideId);";
 
         await db.ExecuteAsync(insertTransactionSql, request, transaction);
-
-        // Если оба запроса прошли успешно — сохраняем изменения в БД
         transaction.Commit();
 
-        return Results.Ok(new { success = true, message = "Ride finished and payment processed" });
+        return Results.Ok(new
+        {
+            success = true,
+            message = "Ride finished and payment processed",
+            receiptHash = receiptHash
+        });
     }
     catch (Exception ex)
     {
@@ -90,11 +100,12 @@ rentApi.MapPost("/stop", async ([FromBody] EndRideRequest request, IDbConnection
     }
 });
 
-// 3. ПОЛУЧИТЬ ИСТОРИЮ ПОЕЗДОК КЛИЕНТА (GET /api/v1/rent/history/{userId})
+// 3. ПОЛУЧИТЬ ИСТОРИЮ ПОЕЗДОК КЛИЕНТА
 rentApi.MapGet("/history/{userId:int}", async (int userId, IDbConnection db) =>
 {
     const string sql = @"
-        SELECT ""ID"" as Id, scooter_id, user_id, ride_start, ride_end, duration, distance, cost 
+        SELECT ""ID"" as Id, scooter_id as ScooterId, user_id as UserId, ride_start as RideStart, 
+               ride_end as RideEnd, duration as Duration, distance as Distance, cost::text as Cost 
         FROM public.rides 
         WHERE user_id = @UserId 
         ORDER BY ride_start DESC;";
@@ -112,18 +123,16 @@ rentApi.MapGet("/history/{userId:int}", async (int userId, IDbConnection db) =>
 
 app.Run("http://127.0.0.1:8080");
 
-// Модели данных (DTO) для входящих запросов от самокатов/приложения
 public record StartRideRequest(long ScooterId, long UserId);
 
 public record EndRideRequest(
     long RideId,
-    long UserId, // cli_id для транзакции
+    long UserId,
     long Duration,
     double Distance,
     decimal Cost
 );
 
-// Модель для ответа истории поездок
 public record RideResponse(
     long Id,
     long ScooterId,
