@@ -124,9 +124,9 @@ rentApi.MapPost("/auth", async ([FromBody] AuthClientRequest request, IDbConnect
 {
     string phoneHash = ComputeSha256Hash(request.Phone);
 
-    const string findSql = @"SELECT ""ID"" FROM public.clients WHERE phone = @Phone LIMIT 1;";
+    const string findSql = @"SELECT ""ID"" FROM public.clients WHERE ""phone number"" = @Phone LIMIT 1;";
     const string insertSql = @"
-        INSERT INTO public.clients (""Surname"", ""Name"", ""Last Name"", email, phone)
+        INSERT INTO public.clients (""Surname"", ""Name"", ""Last Name"", email, ""phone number"")
         VALUES (@Surname, @Name, @LastName, @Email, @Phone)
         RETURNING ""ID"";";
     try
