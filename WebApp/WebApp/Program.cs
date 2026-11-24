@@ -133,6 +133,41 @@ public record EndRideRequest(
     decimal Cost
 );
 
+rentApi.MapPost("/auth", async ([FromBody] AuthClientRequest request, IDbConnection db) =>
+{
+    string phoneHash = ComputeSha256Hash(request.Phone);
+
+    const string findSql = @"SELECT ""ID"" FROM public.clients WHERE ""phone number"" = @Phone LIMIT 1;";
+    const string insertSql = @"
+        INSERT INTO public.clients (""Surname"", ""Name"", ""Last Name"", ""email"", ""phone number"")
+        VALUES (@Surname, @Name, @LastName, @Email, @Phone)
+        RETURNING ""ID"";";
+
+    try
+    {
+        var existingId = await db.ExecuteScalarAsync<int?>(findSql, new { request.Phone });
+        if (existingId.HasValue)
+        {
+            return Results.Ok(new { success = true, id = existingId.Value, phoneHash });
+        }
+
+        var newId = await db.ExecuteScalarAsync<int>(insertSql, new
+        {
+            Surname = string.IsNullOrWhiteSpace(request.Surname) ? "Клиент" : request.Surname,
+            Name = string.IsNullOrWhiteSpace(request.Name) ? "Пользователь" : request.Name,
+            LastName = request.LastName ?? "",
+            Email = request.Email ?? "",
+            Phone = request.Phone
+        });
+
+        return Results.Ok(new { success = true, id = newId, phoneHash });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Database error: {ex.Message}");
+    }
+});
+
 public record RideResponse(
     long Id,
     long ScooterId,
@@ -142,4 +177,11 @@ public record RideResponse(
     long? Duration,
     double? Distance,
     string Cost
+);
+public record AuthClientRequest(
+    string Phone,
+    string? Name,
+    string? Surname,
+    string? LastName,
+    string? Email
 );
