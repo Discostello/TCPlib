@@ -60,16 +60,37 @@ telemetryApi.MapGet("/nearby", async ([FromQuery] double lat, [FromQuery] double
 
     try
     {
-        // Ищем в Redis элементы в радиусе от переданных координат координат
-        var results = await db.GeoRadiusAsync(redisGeoKey, lng, lat, radiusInMeters, GeoUnit.Meters);
+        // Запрашиваем из Redis самокаты в радиусе ВМЕСТЕ С ИХ КООРДИНАТАМИ
+        var results = await db.GeoRadiusAsync(
+            redisGeoKey,
+            lng,
+            lat,
+            radiusInMeters,
+            GeoUnit.Meters,
+            options: GeoRadiusOptions.WithCoordinates
+        );
 
-        // Формируем список ID найденных самокатов
-        var scooterIds = results.Select(r => r.Member.ToString()).ToList();
+        var scooters = new List<object>();
+
+        foreach (var r in results)
+        {
+            string id = r.Member.ToString();
+            var batteryVal = await db.HashGetAsync($"scooter:status:{id}", "battery");
+            int battery = batteryVal.HasValue && int.TryParse(batteryVal.ToString(), out var b) ? b : 100;
+
+            scooters.Add(new
+            {
+                id = id,
+                latitude = r.Position?.Latitude ?? 0,
+                longitude = r.Position?.Longitude ?? 0,
+                batteryLevel = battery
+            });
+        }
 
         return Results.Ok(new
         {
-            count = scooterIds.Count,
-            scooters = scooterIds
+            count = scooters.Count,
+            scooters = scooters
         });
     }
     catch (Exception ex)
