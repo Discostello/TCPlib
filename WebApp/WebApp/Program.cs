@@ -13,6 +13,9 @@ string connectionString = builder.Configuration.GetConnectionString("DefaultConn
 builder.Services.AddTransient<IDbConnection>(_ => new NpgsqlConnection(connectionString));
 
 var app = builder.Build();
+string phonePepper = builder.Configuration["Security:PhonePepper"]
+    ?? throw new InvalidOperationException("PhonePepper not configured.");
+
 var rentApi = app.MapGroup("/api/v1/rent");
 
 // Вспомогательная функция SHA-256 хеширования
@@ -20,6 +23,23 @@ static string ComputeSha256Hash(string rawData)
 {
     byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawData));
     return Convert.ToHexString(bytes).ToLowerInvariant();
+}
+
+// Нормализация номера телефона (оставляем только цифры, 8 в начале меняем на 7)
+static string NormalizePhone(string phone)
+{
+    var digits = new string(phone.Where(char.IsDigit).ToArray());
+    if (digits.Length == 11 && digits.StartsWith('8'))
+        digits = "7" + digits[1..];
+    return digits;
+}
+
+// Хеширование телефона с секретным ключом (HMAC-SHA256)
+static string HashPhone(string rawPhone, string pepper)
+{
+    string normalized = NormalizePhone(rawPhone);
+    byte[] hash = HMACSHA256.HashData(Encoding.UTF8.GetBytes(pepper), Encoding.UTF8.GetBytes(normalized));
+    return Convert.ToHexString(hash).ToLowerInvariant();
 }
 
 // 1. НАЧАТЬ ПОЕЗДКУ
@@ -120,21 +140,27 @@ rentApi.MapGet("/history/{userId:int}", async (int userId, IDbConnection db) =>
         return Results.Problem($"Database error: {ex.Message}");
     }
 });
+
+// 4. АВТОРИЗАЦИЯ / РЕГИСТРАЦИЯ КЛИЕНТА (В БД ПИШЕТСЯ ТОЛЬКО ХЕШ ТЕЛЕФОНА)
 rentApi.MapPost("/auth", async ([FromBody] AuthClientRequest request, IDbConnection db) =>
 {
-    string phoneHash = ComputeSha256Hash(request.Phone);
+    if (string.IsNullOrWhiteSpace(request.Phone))
+        return Results.BadRequest(new { success = false, message = "Phone is required" });
 
-    const string findSql = @"SELECT ""ID"" FROM public.clients WHERE ""phone number"" = @Phone LIMIT 1;";
+    string phoneHash = HashPhone(request.Phone, phonePepper);
+
+    const string findSql = @"SELECT ""ID"" FROM public.clients WHERE ""phone number"" = @PhoneHash LIMIT 1;";
     const string insertSql = @"
         INSERT INTO public.clients (""Surname"", ""Name"", ""Last Name"", email, ""phone number"")
-        VALUES (@Surname, @Name, @LastName, @Email, @Phone)
+        VALUES (@Surname, @Name, @LastName, @Email, @PhoneHash)
         RETURNING ""ID"";";
+
     try
     {
-        var existingId = await db.ExecuteScalarAsync<int?>(findSql, new { request.Phone });
+        var existingId = await db.ExecuteScalarAsync<int?>(findSql, new { PhoneHash = phoneHash });
         if (existingId.HasValue)
         {
-            return Results.Ok(new { success = true, id = existingId.Value, phoneHash });
+            return Results.Ok(new { success = true, id = existingId.Value });
         }
 
         var newId = await db.ExecuteScalarAsync<int>(insertSql, new
@@ -143,10 +169,10 @@ rentApi.MapPost("/auth", async ([FromBody] AuthClientRequest request, IDbConnect
             Name = string.IsNullOrWhiteSpace(request.Name) ? "Пользователь" : request.Name,
             LastName = request.LastName ?? "",
             Email = request.Email ?? "",
-            Phone = request.Phone
+            PhoneHash = phoneHash
         });
 
-        return Results.Ok(new { success = true, id = newId, phoneHash });
+        return Results.Ok(new { success = true, id = newId });
     }
     catch (Exception ex)
     {
@@ -165,6 +191,7 @@ public record EndRideRequest(
     double Distance,
     decimal Cost
 );
+
 public record RideResponse(
     long Id,
     long ScooterId,
@@ -175,6 +202,7 @@ public record RideResponse(
     double? Distance,
     string Cost
 );
+
 public record AuthClientRequest(
     string Phone,
     string? Name,
