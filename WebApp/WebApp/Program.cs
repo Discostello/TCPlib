@@ -120,19 +120,6 @@ rentApi.MapGet("/history/{userId:int}", async (int userId, IDbConnection db) =>
         return Results.Problem($"Database error: {ex.Message}");
     }
 });
-
-app.Run("http://127.0.0.1:8080");
-
-public record StartRideRequest(long ScooterId, long UserId);
-
-public record EndRideRequest(
-    long RideId,
-    long UserId,
-    long Duration,
-    double Distance,
-    decimal Cost
-);
-
 rentApi.MapPost("/auth", async ([FromBody] AuthClientRequest request, IDbConnection db) =>
 {
     string phoneHash = ComputeSha256Hash(request.Phone);
@@ -168,6 +155,17 @@ rentApi.MapPost("/auth", async ([FromBody] AuthClientRequest request, IDbConnect
     }
 });
 
+app.Run("http://127.0.0.1:8080");
+
+public record StartRideRequest(long ScooterId, long UserId);
+
+public record EndRideRequest(
+    long RideId,
+    long UserId,
+    long Duration,
+    double Distance,
+    decimal Cost
+);
 public record RideResponse(
     long Id,
     long ScooterId,
